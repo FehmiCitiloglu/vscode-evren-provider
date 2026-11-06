@@ -1,4 +1,16 @@
-# Release validation — 1.1.0
+# Release validation — 1.2.0
+
+Validated on 2026-11-06 on macOS arm64.
+
+- `npm test`: 52 passing tests. New cases cover exact-version consent, refusal, closing/cancellation, key/endpoint changes, document replacement, concurrent reviews, server confirmation, stale or malformed responses, and correct handling of terms-specific versus unrelated HTTP 403 errors.
+- Provider tests verify that refused or unavailable terms checks prevent conversation content from reaching the chat endpoint, and that inference is never automatically retried after a terms rejection.
+- UI tests verify an unchecked consent box and disabled acceptance button, no key in the webview, escaped service text, a restrictive content security policy, and rejection of wrong-version or missing-consent messages.
+- A real VS Code 1.145.2 extension host in a separate profile activated the extension, registered the review command and effort models, opened a fixture-only terms webview, and closed it through cancellation with no acceptance.
+- TypeScript compilation targets stable VS Code 1.104 API types; no proposed APIs are declared.
+- Live service terms endpoints and their schemas were read from the public OpenAPI document. Acceptance POST behavior was tested only against mocked responses. No real account's agreement was accepted and no authenticated live inference was run.
+- Run the native smoke test after `npm run compile` and `npm run build`, using VS Code's `--extensionDevelopmentPath` and `--extensionTestsPath` options with `test/native-smoke.cjs`. Use a separate user-data/extension profile without a real API key.
+
+## Previous validation — 1.1.0
 
 Validated on 2026-11-06 on macOS arm64.
 

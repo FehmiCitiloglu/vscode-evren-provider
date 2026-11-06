@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Adds **Evren: Review and Accept Terms** with the service document, version, account-level status, and explicit checkbox/button consent.
+- Checks terms after key setup, on startup with existing or environment keys, and before chat content is sent.
+- Binds acceptance to the exact reviewed text, version, key, and endpoint; closing, cancellation, or a changed document sends no acceptance.
+- Rechecks server status after acceptance and offers review for `403 terms_not_accepted`, without automatically retrying chat requests.
+- Keeps API keys out of the review webview and prevents upstream error bodies from appearing in logs or notifications.
+
 ## 1.1.0
 
 - Adds per-conversation effort selection through named entries in the Chat model picker, such as “MiMo v2.6 Pro · High”.

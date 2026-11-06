@@ -15,9 +15,23 @@ An independent, open-source extension by **Fehmi Çitiloğlu** that connects the
 ## Setup
 
 1. Install **Evren Provider (Unofficial)**, published by **Fehmi Çitiloğlu**, from the Marketplace or install its VSIX with **Extensions: Install from VSIX**.
-2. Run **Evren: Set API Key** from the Command Palette.
+2. Run **Evren: Set API Key** from the Command Palette. If your account has not accepted the required service terms, the extension opens a review document. Read it, check the agreement checkbox, and choose **Accept version …** to record your own decision.
 3. Open Chat's model picker or **Chat: Manage Language Models** and select an **Evren (Unofficial)** model.
 4. Run **Evren: Refresh Available Models** after changing service access.
+
+## Review and accept Evren usage terms
+
+Run **Evren: Review and Accept Terms** from the Command Palette at any time.
+
+- The extension checks `/terms/status` after key setup, on startup for existing or environment keys, and before each chat request. If acceptance is needed, it offers **Review Terms**. Setting a key alone never accepts an agreement.
+- The review tab shows the complete text from `/terms/text`, its version, document reference, and configured service endpoint. A checkbox and a separate **Accept version …** button are required. Closing the tab or choosing **Cancel** sends no acceptance.
+- Acceptance posts only the displayed version to `/terms/accept`, using the saved key. The service records it for the key owner's account; the extension confirms the status with the server. There is no local flag that bypasses the service requirement.
+- If the key, endpoint, text, or terms version changes during review, the previous consent is not submitted. Reopen the review for the current connection and document.
+- Already accepted accounts can read the current document without submitting another acceptance. New required terms are detected from the server's status and `403 terms_not_accepted` responses.
+- A blocked chat is not automatically sent again after review. Send the message yourself once acceptance is confirmed. If the terms service cannot be checked, chat content is not sent.
+- The configured endpoint must support Evren's terms API. API keys are never embedded in the review webview; service-provided markup is displayed as inert text.
+
+**Türkçe:** Komut paletinden **Evren: Review and Accept Terms** komutunu açın. Metni ve sürümünü okuyun; kabul etmek istiyorsanız kutucuğu işaretleyip **Accept version …** düğmesine basın. Bu işlem anahtar sahibinin hesabı adına Evren hizmetine onay gönderir. Vazgeçmek veya sekmeyi kapatmak onay göndermez.
 
 ## Select reasoning effort in Chat
 
@@ -44,6 +58,7 @@ The extension queries `/models` and includes a fallback catalog. Successful mode
 | --- | --- |
 | Evren: Set API Key | Save a key in VS Code SecretStorage |
 | Evren: Clear API Key | Remove the key stored by this extension |
+| Evren: Review and Accept Terms | Read the service terms and explicitly accept the reviewed version |
 | Evren: Refresh Available Models | Refresh the model list |
 | Evren: Open Settings | Open extension settings |
 

@@ -1,4 +1,5 @@
 import { EvrenConfig, EvrenModelInfo, KNOWN_MODELS } from './types';
+import { apiError, EvrenApiError } from './apiErrors';
 
 interface RemoteModel {
   id: string;
@@ -51,7 +52,7 @@ export class EvrenClient {
       });
 
       if (!response.ok) {
-        return Object.values(KNOWN_MODELS);
+        throw await apiError(response);
       }
 
       const body = (await response.json()) as { data?: RemoteModel[] };
@@ -85,7 +86,8 @@ export class EvrenClient {
             : known?.supportsReasoningEffort ?? [],
         };
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof EvrenApiError) { throw error; }
       return Object.values(KNOWN_MODELS);
     } finally {
       clearTimeout(timeoutId);
@@ -168,8 +170,7 @@ export class EvrenClient {
         signal: controller.signal,
       });
       if (!response.ok) {
-        // Raw upstream error bodies can contain private input or credentials.
-        throw new Error(`Evren API request failed (HTTP ${response.status}). Check your key, model access, and service status.`);
+        throw await apiError(response);
       }
       if (!response.body) { throw new Error('No response body returned from Evren API.'); }
       reader = response.body.getReader();

@@ -1,97 +1,110 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from './configManager';
 import { EvrenLanguageModelProvider } from './evrenProvider';
+import { sameAccountConnection, TermsService } from './termsService';
+import { VscodeTermsUi } from './termsUi';
 
 export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Evren LLM');
   context.subscriptions.push(outputChannel);
-
   outputChannel.appendLine('[Evren] Activating Evren Provider (Unofficial) by Fehmi Çitiloğlu...');
 
   const configManager = new ConfigManager(context);
-  const provider = new EvrenLanguageModelProvider(configManager, outputChannel);
-  context.subscriptions.push(provider);
+  const terms = new TermsService(configManager, new VscodeTermsUi(), async () => { await provider.refreshModels(); });
+  const provider = new EvrenLanguageModelProvider(configManager, outputChannel, terms);
+  context.subscriptions.push(terms, provider);
 
-  // Register the Language Model Chat Provider
   try {
-    const registration = vscode.lm.registerLanguageModelChatProvider('fehmicitiloglu-evren', provider);
-    context.subscriptions.push(registration);
-    outputChannel.appendLine('[Evren] Successfully registered LanguageModelChatProvider for vendor "fehmicitiloglu-evren".');
-  } catch (err: any) {
-    outputChannel.appendLine(`[Evren] Warning: Failed to register LanguageModelChatProvider directly: ${err.message}`);
+    context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider('fehmicitiloglu-evren', provider));
+    outputChannel.appendLine('[Evren] Registered the language model provider.');
+  } catch {
+    outputChannel.appendLine('[Evren] Could not register the language model provider. Check VS Code compatibility.');
   }
 
-  // Command: Set API Key
-  context.subscriptions.push(
-    vscode.commands.registerCommand('evren.setApiKey', async () => {
-      const currentKey = await configManager.getApiKey();
-      const apiKey = await vscode.window.showInputBox({
-        title: 'Evren LLM API Key',
-        prompt: 'Enter your Evren API Key (stored securely in VS Code Keychain)',
-        value: currentKey ? currentKey : '',
-        password: true,
-        ignoreFocusOut: true,
-      });
-
-      if (apiKey !== undefined) {
-        if (apiKey.trim()) {
-          await configManager.setApiKey(apiKey.trim());
-          vscode.window.showInformationMessage('Evren API Key stored securely in VS Code Keychain.');
-          await provider.refreshModels();
-        } else {
-          await configManager.clearApiKey();
-          vscode.window.showInformationMessage('Evren API Key removed.');
-          await provider.refreshModels();
-        }
+  const command = (name: string, action: () => Promise<void>) => {
+    context.subscriptions.push(vscode.commands.registerCommand(name, async () => {
+      try { await action(); } catch (error) {
+        const message = error instanceof Error ? error.message : 'The Evren operation failed.';
+        outputChannel.appendLine(`[Evren] ${message}`);
+        void vscode.window.showErrorMessage(message);
       }
-    })
-  );
+    }));
+  };
 
-  // Command: Clear API Key
-  context.subscriptions.push(
-    vscode.commands.registerCommand('evren.clearApiKey', async () => {
+  command('evren.setApiKey', async () => {
+    const apiKey = await vscode.window.showInputBox({
+      title: 'Evren LLM API Key',
+      prompt: 'Enter your Evren API key. Usage terms are reviewed separately before acceptance.',
+      password: true,
+      ignoreFocusOut: true,
+    });
+    if (apiKey === undefined) { return; }
+    terms.invalidate();
+    if (!apiKey.trim()) {
       await configManager.clearApiKey();
-      vscode.window.showInformationMessage('Evren API Key has been cleared.');
+      void vscode.window.showInformationMessage('Saved Evren key removed. An EVREN_API_KEY environment variable may still apply.');
       await provider.refreshModels();
-    })
-  );
+      return;
+    }
+    await configManager.setApiKey(apiKey.trim());
+    void vscode.window.showInformationMessage('Evren API key stored in VS Code SecretStorage. Checking usage terms...');
+    const config = await configManager.getConfig();
+    if (await terms.ensureAccepted(config, undefined, true)) { await provider.refreshModels(); }
+  });
 
-  // Command: Refresh Models
-  context.subscriptions.push(
-    vscode.commands.registerCommand('evren.refreshModels', async () => {
-      await provider.refreshModels();
-      vscode.window.showInformationMessage('Evren model list refreshed successfully.');
-    })
-  );
+  command('evren.clearApiKey', async () => {
+    terms.invalidate();
+    await configManager.clearApiKey();
+    void vscode.window.showInformationMessage('Saved Evren key removed. An EVREN_API_KEY environment variable may still apply.');
+    await provider.refreshModels();
+  });
 
-  // Command: Open Settings
-  context.subscriptions.push(
-    vscode.commands.registerCommand('evren.openSettings', () => {
-      vscode.commands.executeCommand('workbench.action.openSettings', 'evren');
-    })
-  );
+  command('evren.reviewTerms', async () => {
+    const config = await configManager.getConfig();
+    if (await terms.reviewAndAccept(config)) { await provider.refreshModels(); }
+  });
 
-  // Listen to configuration changes
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration(async (e) => {
-      if (e.affectsConfiguration('evren')) {
-        outputChannel.appendLine('[Evren] Configuration changed, updating models...');
+  command('evren.refreshModels', async () => {
+    const config = await configManager.getConfig();
+    if (config.apiKey && !await terms.ensureAccepted(config)) { return; }
+    if (await provider.refreshModels()) {
+      void vscode.window.showInformationMessage('Evren model list refreshed.');
+    } else {
+      void vscode.window.showErrorMessage('Evren models could not be refreshed. Check your key, terms status, and service access.');
+    }
+  });
+
+  command('evren.openSettings', async () => {
+    await vscode.commands.executeCommand('workbench.action.openSettings', 'evren');
+  });
+
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+    if (e.affectsConfiguration('evren.serverUrl')) { terms.invalidate(); }
+    if (e.affectsConfiguration('evren')) {
+      outputChannel.appendLine('[Evren] Configuration changed, refreshing models...');
+      void (async () => {
+        const current = await configManager.getConfig();
+        if (current.apiKey && !await terms.ensureAccepted(current)) { return; }
         await provider.refreshModels();
-      }
-    })
-  );
+      })().catch(error => outputChannel.appendLine(`[Evren] Configuration refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+    }
+  }));
 
-  // Initial load
+  // Also covers environment-variable keys and users upgrading from earlier releases.
   const config = await configManager.getConfig();
   if (config.apiKey) {
-    if (vscode.workspace.getConfiguration('evren').get('autoRefreshModels', true)) {
-      provider.refreshModels().catch(() => {});
-    }
+    void (async () => {
+      if (await terms.ensureAccepted(config) && sameAccountConnection(config, await configManager.getConfig()) &&
+          vscode.workspace.getConfiguration('evren').get('autoRefreshModels', true)) {
+        await provider.refreshModels();
+      }
+    })().catch(error => {
+      outputChannel.appendLine(`[Evren] Usage terms check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    });
   } else {
-    outputChannel.appendLine('[Evren] No API key detected. Run "Evren: Set API Key" to enable.');
+    outputChannel.appendLine('[Evren] No API key configured. Run "Evren: Set API Key" to begin.');
   }
-
-  outputChannel.appendLine('[Evren] Extension activated successfully.');
+  outputChannel.appendLine('[Evren] Extension activated.');
 }
 
 export function deactivate() {}

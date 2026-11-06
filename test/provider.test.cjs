@@ -69,9 +69,10 @@ const {EvrenLanguageModelProvider} = require('../out/evrenProvider');
 const {ConfigManager} = require('../out/configManager');
 Module._load = oldLoad;
 const token = {isCancellationRequested:false,onCancellationRequested(){return {dispose(){}};}};
+const acceptedTerms = {ensureAccepted:async()=>true,reviewAndAccept:async()=>true};
 
 test('provider implements token count and advertises only supported inputs', async () => {
-  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}});
+  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}}, acceptedTerms);
   const models = provider.provideLanguageModelChatInformation({silent:true}, token);
   assert.ok(models.length > 0); assert.ok(models.every(m => m.capabilities.imageInput === false));
   assert.equal(await provider.provideTokenCount(models[0], 'Türkçe', token), Buffer.byteLength('Türkçe'));
@@ -81,7 +82,7 @@ test('provider implements token count and advertises only supported inputs', asy
 
 test('text, tool calls, and tool results survive conversion to the API', async () => {
   let payload;
-  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}});
+  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}}, acceptedTerms);
   const messages = [
     {role:1,content:[new vscode.LanguageModelTextPart('hello')]},
     {role:2,content:[new vscode.LanguageModelToolCallPart('c1','lookup',{q:'x'})]},
@@ -117,7 +118,7 @@ test('reasoning variants have unique stable IDs and non-reasoning models have no
 });
 
 test('every selected effort is forwarded with the original model ID and overrides only that request', async () => {
-  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}});
+  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}}, acceptedTerms);
   const models = provider.provideLanguageModelChatInformation({silent:true},token);
   const variants = models.filter(m => m.id.startsWith('evren-effort:'));
   assert.equal(variants.length,6);
@@ -135,7 +136,7 @@ test('every selected effort is forwarded with the original model ID and override
 });
 
 test('default model selection uses enabled medium setting', async () => {
-  const provider = new EvrenLanguageModelProvider({getConfig:async()=>({...config,enableThinking:true})}, {appendLine(){}});
+  const provider = new EvrenLanguageModelProvider({getConfig:async()=>({...config,enableThinking:true})}, {appendLine(){}}, acceptedTerms);
   let payload;
   await withFetch(async (_url, options) => {payload=JSON.parse(options.body);return stream(['data: [DONE]\n']);}, async()=>provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[],{}, {report(){}},token));
   assert.equal(payload.reasoning_effort,'medium');
@@ -148,7 +149,7 @@ test('model discovery uses service effort values, hides non-chat models, and hon
     {id:'mimo-v2.6-pro',task:'chat',capabilities:{reasoning_effort:false}},
     {id:'test-tts',task:'tts'},
   ]};
-  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}});
+  const provider = new EvrenLanguageModelProvider({getConfig:async()=>config}, {appendLine(){}}, acceptedTerms);
   await withFetch(async ()=>Response.json(remote),()=>provider.refreshModels());
   const models = provider.provideLanguageModelChatInformation({silent:true},token);
   assert.equal(models.length,5);
@@ -165,7 +166,7 @@ test('model discovery uses service effort values, hides non-chat models, and hon
 
 test('explicitly unsupported effort is omitted even when global thinking is enabled', async () => {
   const enabled = {...config,enableThinking:true};
-  const provider = new EvrenLanguageModelProvider({getConfig:async()=>enabled}, {appendLine(){}});
+  const provider = new EvrenLanguageModelProvider({getConfig:async()=>enabled}, {appendLine(){}}, acceptedTerms);
   await withFetch(async ()=>Response.json({data:[{id:'mimo-v2.6-pro',task:'chat',capabilities:{reasoning_effort:false}}]}),()=>provider.refreshModels());
   let payload;
   await withFetch(async (_url,options)=>{payload=JSON.parse(options.body);return stream(['data: [DONE]\n']);},()=>provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[],{}, {report(){}},token));
@@ -178,4 +179,41 @@ test('API capability with open vocabulary uses the standard levels and preserves
   await withFetch(async()=>Response.json({data:[{id:'new-chat',task:'chat',capabilities:{thinking:false,reasoning_effort:true,reasoning_effort_values:null}}]}),async()=>{models=await new EvrenClient(config).getAvailableModels();});
   assert.deepEqual(models[0].supportsReasoningEffort,['low','medium','high']);
   assert.equal(modelSelections(models).length,4);
+});
+
+test('terms refusal prevents chat content and tools from reaching the API', async () => {
+  let requests=0;const provider=new EvrenLanguageModelProvider({getConfig:async()=>config},{appendLine(){}},{ensureAccepted:async()=>false});
+  await withFetch(async()=>{requests++;throw new Error('unexpected');},async()=>await assert.rejects(provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[{role:1,content:[new vscode.LanguageModelTextPart('private workspace content')]}],{}, {report(){}},token),/terms are not accepted/));
+  assert.equal(requests,0);provider.dispose();
+});
+
+test('terms lookup failures fail closed instead of sending the chat request', async () => {
+  let requests=0;const provider=new EvrenLanguageModelProvider({getConfig:async()=>config},{appendLine(){}},{ensureAccepted:async()=>{throw new Error('Terms service unavailable');}});
+  await withFetch(async()=>{requests++;throw new Error('unexpected');},async()=>await assert.rejects(provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[],{}, {report(){}},token),/Terms service unavailable/));
+  assert.equal(requests,0);provider.dispose();
+});
+
+test('late terms_not_accepted reopens review but never retries inference', async () => {
+  const modes=[];let requests=0;const logs=[];
+  const provider=new EvrenLanguageModelProvider({getConfig:async()=>config},{appendLine(message){logs.push(message);}},{ensureAccepted:async(_config,_token,direct)=>{modes.push(direct);return true;}});
+  await withFetch(async()=>{requests++;return Response.json({error:{code:'terms_not_accepted',message:'private upstream data'}},{status:403});},async()=>await assert.rejects(provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[],{}, {report(){}},token),/send your message again/));
+  assert.equal(requests,1);assert.deepEqual(modes,[undefined,true]);assert.equal(logs.some(message=>message.includes('private upstream')),false);provider.dispose();
+});
+
+test('unrelated 403 responses do not trigger a terms acceptance flow', async () => {
+  let checks=0;const provider=new EvrenLanguageModelProvider({getConfig:async()=>config},{appendLine(){}},{ensureAccepted:async()=>{checks++;return true;}});
+  await withFetch(async()=>Response.json({error:{code:'insufficient_scope'}},{status:403}),async()=>await assert.rejects(provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[],{}, {report(){}},token),error=>error.status===403 && error.code===undefined));
+  assert.equal(checks,1);provider.dispose();
+});
+
+test('identity change after terms verification prevents inference under a stale key', async () => {
+  let checks=0;let requests=0;const provider=new EvrenLanguageModelProvider({getConfig:async()=>checks++===0?config:{...config,apiKey:'changed'}},{appendLine(){}},acceptedTerms);
+  await withFetch(async()=>{requests++;throw new Error('unexpected');},async()=>await assert.rejects(provider.provideLanguageModelChatResponse({id:'mimo-v2.6-pro'},[],{}, {report(){}},token),/key or endpoint changed/));
+  assert.equal(requests,0);provider.dispose();
+});
+
+test('terms errors during model discovery are not hidden behind a fallback catalog', async () => {
+  const provider=new EvrenLanguageModelProvider({getConfig:async()=>config},{appendLine(){}},acceptedTerms);
+  await withFetch(async()=>Response.json({detail:{code:'terms_not_accepted'}},{status:403}),async()=>assert.equal(await provider.refreshModels(),false));
+  assert.deepEqual(provider.provideLanguageModelChatInformation({silent:true},token),[]);provider.dispose();
 });

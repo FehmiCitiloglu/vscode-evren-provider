@@ -3,6 +3,8 @@ import { ConfigManager } from './configManager';
 import { EvrenClient, ChatMessage } from './evrenClient';
 import { EvrenModelInfo, KNOWN_MODELS } from './types';
 import { effortLabel, modelSelections, selectedEffort } from './effort';
+import { sameAccountConnection, TermsGate } from './termsService';
+import { EvrenApiError } from './apiErrors';
 
 export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvider, vscode.Disposable {
   private readonly _onDidChangeLanguageModelChatInformation = new vscode.EventEmitter<void>();
@@ -13,12 +15,13 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
 
   constructor(
     private readonly configManager: ConfigManager,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    private readonly terms: TermsGate,
   ) {
     this.outputChannel = outputChannel;
   }
 
-  public async refreshModels(): Promise<void> {
+  public async refreshModels(): Promise<boolean> {
     this.outputChannel.appendLine('[Evren] Refreshing model list...');
     try {
       const config = await this.configManager.getConfig();
@@ -26,8 +29,14 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
       this.models = await client.getAvailableModels();
       this.outputChannel.appendLine(`[Evren] Loaded ${this.models.length} models: ${this.models.map((m) => m.id).join(', ')}`);
       this._onDidChangeLanguageModelChatInformation.fire();
+      return true;
     } catch (err: any) {
       this.outputChannel.appendLine(`[Evren] Error refreshing models: ${err.message}`);
+      if (err instanceof EvrenApiError) {
+        this.models = [];
+        this._onDidChangeLanguageModelChatInformation.fire();
+      }
+      return false;
     }
   }
 
@@ -62,6 +71,7 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
   ): Promise<void> {
+    if (token.isCancellationRequested) { throw new vscode.CancellationError(); }
     const config = await this.configManager.getConfig();
     if (!config.apiKey) {
       const setKeyAction = 'Set API Key';
@@ -74,6 +84,15 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
       }
       throw new Error('Evren API Key missing.');
     }
+
+    if (!await this.terms.ensureAccepted(config, token)) {
+      if (token.isCancellationRequested) { throw new vscode.CancellationError(); }
+      throw new Error('Evren usage terms are not accepted. Run "Evren: Review and Accept Terms" before sending your message.');
+    }
+    if (!sameAccountConnection(config, await this.configManager.getConfig())) {
+      throw new Error('Your Evren key or endpoint changed. Review the current connection and send your message again.');
+    }
+    if (token.isCancellationRequested) { throw new vscode.CancellationError(); }
 
     const selection = modelSelections(this.models).find(selection => selection.id === model.id);
     if (!selection) {
@@ -118,6 +137,11 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
     } catch (err: any) {
       if (token.isCancellationRequested) {
         throw new vscode.CancellationError();
+      }
+      if (err instanceof EvrenApiError && err.code === 'terms_not_accepted') {
+        await this.terms.ensureAccepted(config, token, true);
+        if (token.isCancellationRequested) { throw new vscode.CancellationError(); }
+        throw new Error('Evren usage terms changed or require acceptance. After reviewing them, send your message again.');
       }
       this.outputChannel.appendLine(`[Evren] Chat request failed: ${err.message}`);
       throw err;

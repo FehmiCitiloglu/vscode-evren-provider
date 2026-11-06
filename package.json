@@ -2,7 +2,7 @@
   "name": "evren-provider",
   "displayName": "Evren Provider (Unofficial)",
   "description": "Unofficial, independent Evren API integration for VS Code Chat. By Fehmi Çitiloğlu; not affiliated with or endorsed by the Evren service operator.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "FehmiCitiloglu",
   "author": {
     "name": "Fehmi Çitiloğlu",
@@ -62,6 +62,11 @@
       {
         "command": "evren.clearApiKey",
         "title": "Evren: Clear API Key",
+        "category": "Evren LLM"
+      },
+      {
+        "command": "evren.reviewTerms",
+        "title": "Evren: Review and Accept Terms",
         "category": "Evren LLM"
       },
       {
