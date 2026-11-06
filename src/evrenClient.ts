@@ -1,5 +1,19 @@
 import { EvrenConfig, EvrenModelInfo, KNOWN_MODELS } from './types';
 
+interface RemoteModel {
+  id: string;
+  task?: string;
+  context_length?: number | null;
+  default_max_output_tokens?: number | null;
+  capabilities?: {
+    tools?: boolean;
+    vision?: boolean;
+    thinking?: boolean;
+    reasoning_effort?: boolean;
+    reasoning_effort_values?: string[] | null;
+  } | null;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | any[] | null;
@@ -23,9 +37,9 @@ export class EvrenClient {
       return Object.values(KNOWN_MODELS);
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(`${this.config.serverUrl}/models`, {
         method: 'GET',
@@ -36,44 +50,45 @@ export class EvrenClient {
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
       if (!response.ok) {
         return Object.values(KNOWN_MODELS);
       }
 
-      const body = (await response.json()) as { data?: Array<{ id: string }> };
-      const remoteIds = new Set((body.data || []).map((m) => m.id));
-
-      // Filter to relevant chat models
-      const results: EvrenModelInfo[] = [];
-
-      // Add known models that are either confirmed or standard
-      for (const [id, model] of Object.entries(KNOWN_MODELS)) {
-        if (remoteIds.size === 0 || remoteIds.has(id)) {
-          results.push(model);
-        }
-      }
-
-      // If remote has other models ending in -pro, -flash, or chat-like that aren't in known
-      for (const id of remoteIds) {
-        if (!KNOWN_MODELS[id] && !id.includes('ocr') && !id.includes('embedding') && !id.includes('reranker') && !id.includes('asr')) {
-          results.push({
-            id,
-            name: id,
-            family: 'evren',
-            contextWindow: 131072,
-            maxOutputTokens: this.config.maxOutputTokens,
-            toolCalling: true,
-            vision: false,
-            thinking: false,
-          });
-        }
-      }
-
-      return results.length > 0 ? results : Object.values(KNOWN_MODELS);
+      const body = (await response.json()) as { data?: RemoteModel[] };
+      if (!Array.isArray(body.data)) { return Object.values(KNOWN_MODELS); }
+      return body.data.filter(remote =>
+        typeof remote.id === 'string' && remote.id.length > 0 &&
+        (remote.task ? ['chat', 'vision_chat'].includes(remote.task)
+          : Boolean(KNOWN_MODELS[remote.id]) || !/ocr|embedding|rerank|asr|tts|speech|transcri/i.test(remote.id))
+      ).map(remote => {
+        const known = KNOWN_MODELS[remote.id];
+        const caps = remote.capabilities;
+        const contextWindow = remote.context_length && remote.context_length > 1
+          ? remote.context_length : known?.contextWindow ?? 131072;
+        const output = remote.default_max_output_tokens && remote.default_max_output_tokens > 0
+          ? remote.default_max_output_tokens : known?.maxOutputTokens ?? this.config.maxOutputTokens;
+        return {
+          id: remote.id,
+          name: known?.name ?? remote.id,
+          family: known?.family ?? 'evren',
+          contextWindow,
+          maxOutputTokens: Math.min(output, contextWindow - 1),
+          toolCalling: caps ? caps.tools === true : known?.toolCalling ?? false,
+          vision: caps ? caps.vision === true : known?.vision ?? false,
+          thinking: caps ? caps.thinking === true : known?.thinking ?? false,
+          // Explicit service capabilities override the prototype catalog.
+          supportsReasoningEffort: caps
+            ? caps.reasoning_effort === true
+              ? caps.reasoning_effort_values == null ? ['low', 'medium', 'high']
+                : Array.isArray(caps.reasoning_effort_values) ? caps.reasoning_effort_values : []
+              : []
+            : known?.supportsReasoningEffort ?? [],
+        };
+      });
     } catch {
       return Object.values(KNOWN_MODELS);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -90,7 +105,6 @@ export class EvrenClient {
     }
 
     const modelInfo = KNOWN_MODELS[modelId];
-    const isThinkingCapable = modelInfo ? modelInfo.thinking : true;
 
     const payload: any = {
       model: modelId,
@@ -104,7 +118,7 @@ export class EvrenClient {
       if (requireTool) { payload.tool_choice = 'required'; }
     }
 
-    if (isThinkingCapable && this.config.enableThinking) {
+    if (this.config.enableThinking) {
       payload.reasoning_effort = this.config.reasoningEffort;
     }
 

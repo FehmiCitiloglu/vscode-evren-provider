@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConfigManager } from './configManager';
 import { EvrenClient, ChatMessage } from './evrenClient';
 import { EvrenModelInfo, KNOWN_MODELS } from './types';
+import { effortLabel, modelSelections, selectedEffort } from './effort';
 
 export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvider, vscode.Disposable {
   private readonly _onDidChangeLanguageModelChatInformation = new vscode.EventEmitter<void>();
@@ -34,14 +35,19 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
     _options: vscode.PrepareLanguageModelChatModelOptions,
     _token: vscode.CancellationToken
   ): vscode.LanguageModelChatInformation[] {
-    return this.models.map((m) => ({
-      id: m.id,
-      name: m.name,
+    return modelSelections(this.models).map(({ id, model: m, effort }) => ({
+      id,
+      name: effort === undefined ? m.name : `${m.name} · ${effortLabel(effort)}`,
       family: m.family || 'evren',
       version: '1.0.0',
       maxInputTokens: m.contextWindow - m.maxOutputTokens,
       maxOutputTokens: m.maxOutputTokens,
-      detail: 'Unofficial integration by Fehmi Çitiloğlu',
+      detail: effort === undefined
+        ? 'Default effort from Evren settings · Unofficial'
+        : `Effort: ${effortLabel(effort)} · Unofficial`,
+      tooltip: effort === undefined
+        ? 'Uses Evren Enable Thinking and Reasoning Effort settings when supported; otherwise uses the API default.'
+        : `Use ${effort} reasoning effort for this model selection. Overrides the global thinking and effort settings.`,
       capabilities: {
         toolCalling: m.toolCalling,
         imageInput: false,
@@ -69,11 +75,21 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
       throw new Error('Evren API Key missing.');
     }
 
-    const client = new EvrenClient(config);
+    const selection = modelSelections(this.models).find(selection => selection.id === model.id);
+    if (!selection) {
+      throw new Error('This Evren model selection is no longer available. Refresh models and select a model again.');
+    }
+    const effort = selectedEffort(selection, config.enableThinking, config.reasoningEffort);
+    const client = new EvrenClient({
+      ...config,
+      maxOutputTokens: Math.min(config.maxOutputTokens, selection.model.maxOutputTokens),
+      enableThinking: effort !== undefined,
+      reasoningEffort: effort ?? config.reasoningEffort,
+    });
     const formattedMessages = this.convertMessages(messages);
     const formattedTools = this.convertTools(options.tools);
 
-    this.outputChannel.appendLine(`[Evren] Chat request: model=${model.id}, messages=${formattedMessages.length}, tools=${formattedTools?.length ?? 0}`);
+    this.outputChannel.appendLine(`[Evren] Chat request: model=${selection.model.id}, effort=${effort ?? 'API default'}, messages=${formattedMessages.length}, tools=${formattedTools?.length ?? 0}`);
 
     const abortController = new AbortController();
     if (token.isCancellationRequested) { throw new vscode.CancellationError(); }
@@ -84,7 +100,7 @@ export class EvrenLanguageModelProvider implements vscode.LanguageModelChatProvi
 
     try {
       await client.streamChat(
-        model.id,
+        selection.model.id,
         formattedMessages,
         formattedTools,
         {

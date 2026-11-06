@@ -19,9 +19,24 @@ An independent, open-source extension by **Fehmi Çitiloğlu** that connects the
 3. Open Chat's model picker or **Chat: Manage Language Models** and select an **Evren (Unofficial)** model.
 4. Run **Evren: Refresh Available Models** after changing service access.
 
+## Select reasoning effort in Chat
+
+Open the Chat model picker and select a model entry with an effort suffix, such as
+**MiMo v2.6 Pro · High** or **DeepSeek V4.1 Flash · High** when advertised by the service.
+The selected entry carries its effort into that conversation's requests; another
+conversation can select a different entry. No settings editing is needed.
+
+- The plain model name keeps the existing global defaults: thinking enabled and `medium` effort when supported.
+- An explicit effort entry overrides the global thinking switch and effort for that selection only. Selecting **None**, when supported, sends `reasoning_effort: "none"`.
+- Available levels come from the API's `capabilities.reasoning_effort_values`. If the API explicitly supports effort without enumerating values, Low / Medium / High are offered. Models that do not advertise effort support have no effort variants. Gateway aliases may map a selected level to a different upstream value.
+- If a configured default level is unsupported, the plain model sends no effort parameter and uses the API default.
+- The extension uses the stable VS Code API: effort levels appear as separate model entries, rather than the experimental nested effort submenu.
+- If discovery is unavailable, only the prototype catalog's explicitly declared effort levels are offered. Refresh after setting your API key to discover the service's current capabilities.
+
+
 The extension supports streaming text and OpenAI-compatible tool calls. VS Code and the calling chat application control tool execution and approval. Reasoning effort is configurable for compatible models; separate reasoning text and image attachments are not supported in this version.
 
-The extension queries `/models` and includes a fallback catalog. Catalog context sizes and capabilities are estimates inherited from the prototype, not a guarantee from the service operator. Token counting uses a conservative UTF-8 byte estimate rather than each model's exact tokenizer, so the usable context may be smaller than the advertised limit. Model compatibility varies; no live paid inference was used to validate this release.
+The extension queries `/models` and includes a fallback catalog. Successful model discovery uses the service's context and capability metadata. The fallback catalog contains prototype estimates, not a guarantee from the service operator. Token counting uses a conservative UTF-8 byte estimate rather than each model's exact tokenizer, so the usable context may be smaller than the advertised limit. Model compatibility varies; no live paid inference was used to validate this release.
 
 ## Commands
 
