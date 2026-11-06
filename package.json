@@ -1,0 +1,145 @@
+{
+  "name": "evren-provider",
+  "displayName": "Evren Provider (Unofficial)",
+  "description": "Unofficial, independent Evren API integration for VS Code Chat. By Fehmi Çitiloğlu; not affiliated with or endorsed by the Evren service operator.",
+  "version": "1.0.0",
+  "publisher": "FehmiCitiloglu",
+  "author": {
+    "name": "Fehmi Çitiloğlu",
+    "email": "fehmicitiloglu@gmail.com",
+    "url": "https://github.com/FehmiCitiloglu"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FehmiCitiloglu/vscode-evren-provider"
+  },
+  "homepage": "https://github.com/FehmiCitiloglu/vscode-evren-provider#readme",
+  "bugs": {
+    "url": "https://github.com/FehmiCitiloglu/vscode-evren-provider/issues"
+  },
+  "icon": "assets/icon.png",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "evren",
+    "copilot",
+    "chat",
+    "language model",
+    "ai",
+    "llm",
+    "deepseek",
+    "mimo",
+    "qwen",
+    "byok"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguageModelChatProvider:fehmicitiloglu-evren"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "node esbuild.js --production",
+    "package": "npx @vscode/vsce package",
+    "test": "npm run compile && node --test test/*.test.cjs"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "evren.setApiKey",
+        "title": "Evren: Set API Key",
+        "category": "Evren LLM"
+      },
+      {
+        "command": "evren.clearApiKey",
+        "title": "Evren: Clear API Key",
+        "category": "Evren LLM"
+      },
+      {
+        "command": "evren.refreshModels",
+        "title": "Evren: Refresh Available Models",
+        "category": "Evren LLM"
+      },
+      {
+        "command": "evren.openSettings",
+        "title": "Evren: Open Settings",
+        "category": "Evren LLM"
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "fehmicitiloglu-evren",
+        "displayName": "Evren (Unofficial)",
+        "managementCommand": "evren.setApiKey"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Evren LLM Provider",
+      "properties": {
+        "evren.serverUrl": {
+          "type": "string",
+          "default": "https://evren-llmapi.ssyz.org.tr/v1",
+          "description": "HTTPS Evren API base URL. Your API key and selected chat content are sent to this endpoint.",
+          "scope": "machine",
+          "pattern": "^https://[^\\s]+$"
+        },
+        "evren.autoRefreshModels": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically discover and refresh available models on startup"
+        },
+        "evren.enableThinking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable reasoning / thinking mode for supported models (MiMo v2.6 Pro, DeepSeek V4.1, GLM 5.3, Qwen 3.8)"
+        },
+        "evren.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "default": "medium",
+          "description": "Default reasoning effort level for thinking-capable models"
+        },
+        "evren.enableToolCalling": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable tool/function calling for VS Code Copilot Agent Mode"
+        },
+        "evren.maxOutputTokens": {
+          "type": "number",
+          "default": 16384,
+          "description": "Maximum number of completion tokens",
+          "minimum": 1
+        },
+        "evren.requestTimeout": {
+          "type": "number",
+          "default": 120000,
+          "description": "Request timeout in milliseconds",
+          "minimum": 1000
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "1.104.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
